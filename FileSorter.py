@@ -11,9 +11,9 @@ source_folder = os.path.join(user_folder, "Downloads")
 automaticSortMode_status = False
 
 # Move File
-def moveFile(fullFilename, dst_folder):
+def moveFile(fullFilename, filetype_folder):
     src = os.path.join(destination_folder, fullFilename)
-    dst = os.path.join(destination_folder, dst_folder, fullFilename)
+    dst = os.path.join(destination_folder, filetype_folder, fullFilename)
     shutil.move(src, dst)
 
 # Iterate Filename-List to create and sort into Folders
