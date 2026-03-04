@@ -103,10 +103,34 @@ class SortHandler(FileSystemEventHandler):
         if path.suffix.lower() in TEMP_EXTENSIONS:
             return
 
+def initial_scan():
+    logging.info("Initial scan")
+    try:
+        entries = list(DOWNLOADS_FOLDER.iterdir())
+    except Exception as e:
+        logging.error(f"initial scan failed: {e}")
+        return
+    for path in entries:
+        if path.name == "STOP.txt": #STOP.txt ueberspringen
+            continue
+        if not path.is_file():
+            continue
+        if path.suffix.lower() in TEMP_EXTENSIONS:
+            continue
+        if isStable(path):
+            move_file(path)
+        else:
+            for _ in range(5):
+                time.sleep(2)
+                if isStable(path):
+                    move_file(path)
+                    break
+
+    logging.info("Inital scan done")
 
 def main():
     logging.info("FileSorter started (watchdog)")
-
+    initial_scan()
     observer = Observer()
     handler = SortHandler()
     observer.schedule(handler, str(DOWNLOADS_FOLDER), recursive=False)
