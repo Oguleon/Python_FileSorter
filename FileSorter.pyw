@@ -7,17 +7,14 @@ import logging
 from pathlib import Path
 
 from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandle
+from watchdog.events import FileSystemEventHandler
 
 
 #sheduler test
 #import sched
-#TO DO
-#prüfen ob Datei stabil ist- wer noch wächst wird in ruhe gelassen 
-#Namenskonflikte loesen 
+#TO DO:
+#inital scan
 
-
-# Basis-Ordner (macros)
 USER_FOLDER = Path.home() 
 DOWNLOADS_FOLDER = USER_FOLDER / "Downloads"
 
@@ -52,24 +49,6 @@ def isStable(file: Path, wait_secs: float = 2.5, retries: int = 5) -> bool: #rue
         return False
     
 
-# Move File OLD
-#def moveFile(full_filename: str, dst_folder_name: str) -> None:
-    
-    #src = DOWNLOADS_FOLDER / full_filename
-    #dst_folder = DOWNLOADS_FOLDER / dst_folder_name
-    #dst = dst_folder / full_filename
-    #try:
-     #   if not src.exists():
-      #      logging.warning(f"Source does no longer exist (race?): {src}")
-      #      return
-      #  if src.is_dir():
-      #      return
-      #  dst_folder.mkdir(exist_ok=True)
-      #  shutil.move(str(src), str(dst))
-       # logging.info(f"moved {src.name} -> {dst_folder.name}/")
-    #except Exception as e:
-     #   logging.error(f"error while moving '{src}' -> '{dst}':{e}")
-#Move neu
 def move_file(file: Path):
     if not file.exists() or not file.is_file():
         return  #early escape
@@ -80,9 +59,14 @@ def move_file(file: Path):
     target_dir.mkdir(exist_ok=True)
     target = target_dir / file.name
 
-    #namenskonflikte hier
-    #here 
-
+    #namenskonflikte 
+    if target.exists():
+        stem, suffix = file.stem, file.suffix
+        i = 1
+        while target.exists():
+            target= target_dir / f"{stem} ({i}){suffix}" #hängt eine Nummer an filenamen (iterate)
+            i += 1
+    
     #move here 
     try:
         shutil.move(str(file), str(target))
@@ -90,46 +74,58 @@ def move_file(file: Path):
     except Exception as e:
         logging.error(f"move failed '{file}'->'{target}': {e}")
 
+class SortHandler(FileSystemEventHandler):
+    def on_created(self, event):
+        if event.is_directory:
+            return
+        path = Path(event.src_path)
+        logging.info(f"Created event: {path.name}")
+    #STOP case
+        if path.name == "STOP.txt":
+            logging.info("STOP.txt created (event). Main loop will stop")
+            return
+    
+        if isStable(path):
+            move_file(path)
+        else:
+            #fallback
+            for _ in range (5):
+                if isStable(path):
+                    move_file(path)
+                    break
+                time.sleep(2)
+    
+    def on_modified(self, event):
+        #optional wenn modification
+        if event.is_directory:
+            return
+        path = Path(event.src_path)
+        if path.suffix.lower() in TEMP_EXTENSIONS:
+            return
 
-# Iterate Filename-List to create and sort into Folders
-def createSortIntoFolders(file_list: list[str]) -> None:
-    for fullFilename in file_list:
-        src = DOWNLOADS_FOLDER / fullFilename 
-        
-        if not src.exists() or not src.is_file():
-            continue
 
-        # Erweiterung ermitteln (ohne Punkt), z.B. ".pdf" -> "pdf"
-        filetype = src.suffix.lower().lstrip(".")
-        
-        # If folder -> skip
-        if filetype == "":
-            continue
+def main():
+    logging.info("FileSorter started (watchdog)")
 
-        # Zielordnername = Endung (z.B. "pdf")
-        moveFile(fullFilename, filetype)   
-
-def mainloop():
-    logging.info("FileSorter started")
-    while True:
-        try:
-            logging.info("Skript läuft noch...")
-            if (DOWNLOADS_FOLDER / "STOP.txt").exists(): #early escape
-                logging.info("STOP-Datei erkannt. Script beendet sich.")
+    observer = Observer()
+    handler = SortHandler()
+    observer.schedule(handler, str(DOWNLOADS_FOLDER), recursive=False)
+    observer.start()
+    
+    try: 
+        while True:
+            #Stop check here
+            if (DOWNLOADS_FOLDER / "STOP.txt").exists():
+                logging.info("STOP found, ending")
                 break
-            current_entries = os.listdir(DOWNLOADS_FOLDER)
-            createSortIntoFolders(current_entries)
+            time.sleep(1)
+    except KeyboardInterrupt:
+        logging.info("Skript enden manually (keyboard interrupt)")
+    finally:
+        observer.stop()
+        observer.join()
+        logging.info("Observer stopped. Bye.")
 
-            print("-====+====-")
-            print("Files: ", current_entries)
-            print("-====+====-")
-            time.sleep(5)
-        except KeyboardInterrupt:
-            logging.info("Skript ended manually (Keyboard Interrupt)")
-            break
-        except Exception as e:
-            logging.error(f"unhandled error: {e}")
-            time.sleep(5)  
 
 if __name__ == "__main__":
-    mainloop()
+    main()
