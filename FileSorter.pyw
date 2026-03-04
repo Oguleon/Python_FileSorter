@@ -3,6 +3,7 @@ import shutil
 #test: endlos schleife 
 import time
 import logging
+from logging.handlers import RotatingFileHandler
 #paths sauber halten
 from pathlib import Path
 
@@ -19,12 +20,44 @@ USER_FOLDER = Path.home()
 DOWNLOADS_FOLDER = USER_FOLDER / "Downloads"
 
 #logging
-LOG_FILE = DOWNLOADS_FOLDER / "background.log"
-logging.basicConfig(
-    filename=str(LOG_FILE),
-     level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
+LOG_FILE = DOWNLOADS_FOLDER / "FileSorterLogs" / "background.log"
+LOG_FILE.parent.mkdir(exist_ok=True)
+
+def setup_logger(log_path: Path,
+                 level: int = logging.INFO,
+                 max_bytes: int = 5 * 1024, #5kb TO DO: ÄNDERN AUF 5 * 1024 * 1024 (5mb) this is for test iteration
+                 backup_count: int = 5,
+                 also_console: bool = False) -> logging.Logger:
+    
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    logger = logging.getLogger("filesorter")
+    logger.setLevel(level)
+    logger.propagate = False  # verhindert Doppel-Logs über Root-Logger
+    
+ #Handler nicht doppelt hinzufügen
+    if not logger.handlers:
+        fmt = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+
+        file_handler = RotatingFileHandler(
+            filename=str(log_path),
+            maxBytes=max_bytes,
+            backupCount=backup_count,
+            encoding="utf-8"
+        )
+        file_handler.setLevel(level)
+        file_handler.setFormatter(fmt)
+        logger.addHandler(file_handler)
+        
+        if also_console:
+            console = logging.StreamHandler()
+            console.setLevel(level)
+            console.setFormatter(fmt)
+            logger.addHandler(console)
+
+    return logger
+
+logger = setup_logger(LOG_FILE, level=logging.INFO, max_bytes=5*1024, backup_count=7)
+
 TEMP_EXTENSIONS = {".crdownload", ".part", ".tmp"} #tmp dateien werden grundsätzlich ignoriert
 
 def isStable(file: Path, wait_secs: float = 2.5, retries: int = 5) -> bool: #rueckgabewert true false 
@@ -45,7 +78,7 @@ def isStable(file: Path, wait_secs: float = 2.5, retries: int = 5) -> bool: #rue
             prev_size = curr_size
         return False
     except Exception as e:
-        logging.warning(f"stability check failed for {file}: {e}")
+        logger.warning(f"stability check failed for {file}: {e}")
         return False
     
 
@@ -70,19 +103,19 @@ def move_file(file: Path):
     #move here 
     try:
         shutil.move(str(file), str(target))
-        logging.info(f"moved: '{file.name}'->'{target_dir.name}/")
+        logger.info(f"moved: '{file.name}'->'{target_dir.name}/")
     except Exception as e:
-        logging.error(f"move failed '{file}'->'{target}': {e}")
+        logger.error(f"move failed '{file}'->'{target}': {e}")
 
 class SortHandler(FileSystemEventHandler):
     def on_created(self, event):
         if event.is_directory:
             return
         path = Path(event.src_path)
-        logging.info(f"Created event: {path.name}")
+        logger.info(f"Created event: {path.name}")
     #STOP case
         if path.name == "STOP.txt":
-            logging.info("STOP.txt created (event). Main loop will stop")
+            logger.info("STOP.txt created (event). Main loop will stop")
             return
     
         if isStable(path):
@@ -104,11 +137,11 @@ class SortHandler(FileSystemEventHandler):
             return
 
 def initial_scan():
-    logging.info("Initial scan")
+    logger.info("Initial scan")
     try:
         entries = list(DOWNLOADS_FOLDER.iterdir())
     except Exception as e:
-        logging.error(f"initial scan failed: {e}")
+        logger.error(f"Initial scan failed: {e}")
         return
     for path in entries:
         if path.name == "STOP.txt": #STOP.txt ueberspringen
@@ -126,10 +159,10 @@ def initial_scan():
                     move_file(path)
                     break
 
-    logging.info("Inital scan done")
+    logger.info("Inital scan done")
 
 def main():
-    logging.info("FileSorter started (watchdog)")
+    logger.info("FileSorter started (watchdog)")
     initial_scan()
     observer = Observer()
     handler = SortHandler()
@@ -140,15 +173,15 @@ def main():
         while True:
             #Stop check here
             if (DOWNLOADS_FOLDER / "STOP.txt").exists():
-                logging.info("STOP found, ending")
+                logger.info("STOP found, ending")
                 break
             time.sleep(1)
     except KeyboardInterrupt:
-        logging.info("Skript enden manually (keyboard interrupt)")
+        logger.info("Skript ended manually (keyboard interrupt)")
     finally:
         observer.stop()
         observer.join()
-        logging.info("Observer stopped. Bye.")
+        logger.info("Observer stopped. Bye.")
 
 
 if __name__ == "__main__":
