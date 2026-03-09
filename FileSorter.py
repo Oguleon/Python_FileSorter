@@ -23,8 +23,8 @@ def createSortIntoFolders():
         filename, filetype = os.path.splitext(fullFilename)
         filetype = filetype.replace(".", "")
 
-        # If folder -> skip
-        if filetype == "":
+        # If folder or ongoing Browser-Download-> skip
+        if filetype in ["", "crdownload", "part", "tmp"]:
             continue
 
         dst_path = os.path.join(destination_folder, filetype)
